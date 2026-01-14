@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import Editor from "../Components/Editor";
 import FileDrop from "../Components/FileDrop";
 import api from "../services/api";
+import html2pdf from "html2pdf.js";
 
 const BigNoteEditor = ({ note, onUpdate }) => {
   const saveTimeoutRef = useRef();
@@ -13,8 +14,158 @@ const BigNoteEditor = ({ note, onUpdate }) => {
   const [sourceFiles, setSourceFiles] = useState([]);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
   const mounted = useRef(true);
+
+const downloadPDF = async () => {
+  if (downloading) return;
+
+  const source = document.getElementById("note-content");
+  if (!source) return;
+
+  setDownloading(true);
+
+  try {
+    const clone = source.cloneNode(true);
+    clone.id = "pdf-note";
+
+    // Remove Tailwind classes only
+    const stripClasses = (el) => {
+      el.removeAttribute("class");
+      [...el.children].forEach(stripClasses);
+    };
+    stripClasses(clone);
+
+    // PDF typography stylesheet
+    const style = document.createElement("style");
+    style.innerHTML = `
+      * {
+        box-sizing: border-box;
+        color: #111827 !important;
+      }
+
+      body {
+        background: white;
+      }
+
+      #pdf-note {
+        font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 14px;
+        line-height: 1.7;
+        padding: 24px;
+        max-width: 800px;
+      }
+
+      h1 { font-size: 28px; margin: 24px 0 12px; }
+      h2 { font-size: 22px; margin: 20px 0 10px; }
+      h3 { font-size: 18px; margin: 16px 0 8px; }
+
+      p {
+        margin: 10px 0;
+      }
+
+      ul, ol {
+        margin: 12px 0 12px 24px;
+      }
+
+      li {
+        margin: 6px 0;
+      }
+
+      blockquote {
+        border-left: 4px solid #e5e7eb;
+        padding-left: 12px;
+        margin: 14px 0;
+        color: #374151;
+      }
+
+      code {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #f3f4f6;
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-size: 13px;
+      }
+
+      pre {
+        background: #f3f4f6;
+        padding: 12px;
+        border-radius: 6px;
+        overflow-x: auto;
+        margin: 16px 0;
+        font-size: 13px;
+      }
+
+      hr {
+        border: none;
+        border-top: 1px solid #e5e7eb;
+        margin: 24px 0;
+      }
+
+      img {
+        max-width: 100%;
+        border-radius: 6px;
+        margin: 12px 0;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 16px 0;
+      }
+
+      th, td {
+        border: 1px solid #e5e7eb;
+        padding: 8px;
+        text-align: left;
+      }
+
+      /* Kill Tailwind artifacts */
+      *::before,
+      *::after {
+        content: none !important;
+      }
+    `;
+
+    clone.prepend(style);
+
+    const wrapper = document.createElement("div");
+    wrapper.style.position = "fixed";
+    wrapper.style.left = "-9999px";
+    wrapper.appendChild(clone);
+    document.body.appendChild(wrapper);
+
+    await html2pdf()
+      .set({
+        margin: [15, 15, 20, 15],
+        filename: `${title || "note"}.pdf`,
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: {
+          scale: 2,
+          backgroundColor: "#ffffff",
+          useCORS: true,
+        },
+        jsPDF: {
+          unit: "mm",
+          format: "a4",
+          orientation: "portrait",
+        },
+      })
+      .from(clone)
+      .save();
+
+    document.body.removeChild(wrapper);
+  } catch (err) {
+    console.error("Download PDF failed", err);
+  } finally {
+    setDownloading(false);
+  }
+};
+
+
+
+
 
   useEffect(() => {
     setTitle(note.title || "");
@@ -77,6 +228,7 @@ const BigNoteEditor = ({ note, onUpdate }) => {
     }
   };
 
+    
   const deleteNote = async () => {
     if (!confirm("Are you sure you want to delete this note?")) return;
     
@@ -125,6 +277,7 @@ const BigNoteEditor = ({ note, onUpdate }) => {
               <span>💾 Save</span>
             )}
           </button>
+          
           <button 
             onClick={deleteNote} 
             disabled={deleting}
@@ -137,6 +290,21 @@ const BigNoteEditor = ({ note, onUpdate }) => {
               </span>
             ) : (
               <span>🗑 Delete</span>
+            )}
+          </button>
+
+          <button 
+            onClick={downloadPDF} 
+            disabled={downloading}
+            className="btn-primary shadow-md hover:shadow-lg transform hover:scale-105 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+          >
+            {downloading ? (
+              <span className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                Downloading...
+              </span>
+            ) : (
+              <span>📄 Download PDF</span>
             )}
           </button>
         </div>
@@ -198,7 +366,9 @@ const BigNoteEditor = ({ note, onUpdate }) => {
           </div>
         )}
 
-        <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-300 hover:shadow-2xl">
+        <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-300 hover:shadow-2xl"
+              id="note-content"
+        >
           <Editor content={content} onChange={setContent} />
         </div>
       </div>

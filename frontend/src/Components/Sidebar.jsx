@@ -26,7 +26,7 @@ const Sidebar = ({ notes, onSelect, onCreate, activeNote, dark, setDark }) => {
           className="p-2.5 hover:bg-gray-200 dark:hover:bg-gray-800 rounded-xl transition-all duration-300 hover:scale-110 active:scale-95 shadow-sm hover:shadow-md"
           title="Toggle dark mode"
         >
-          <span className="text-2xl">{dark ? "☀️" : "🌙"}</span>
+          {/* <span className="text-2xl">{dark ? "☀️" : "🌙"}</span> */}
         </button>
       </div>
 
