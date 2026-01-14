@@ -84,14 +84,14 @@ const App = () => {
       />
 
       {activeNote ? (
-        <div className="flex-1 animate-fade-in">
+        <div className="flex-1 ml-80 overflow-auto animate-fade-in">
           <BigNoteEditor
             note={activeNote}
             onUpdate={handleUpdate}
           />
         </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950">
+        <div className="flex-1 ml-80 flex items-center justify-center overflow-auto bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950">
           <div className="text-center animate-fade-in">
             <div className="text-8xl mb-6 animate-bounce-subtle">📝</div>
             <h2 className="text-3xl font-bold text-gray-800 dark:text-gray-200 mb-3">
