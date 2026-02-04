@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import Editor from "../Components/Editor";
 import FileDrop from "../Components/FileDrop";
 import api from "../services/api";
@@ -16,30 +16,32 @@ const BigNoteEditor = ({ note, onUpdate }) => {
   const [deleting, setDeleting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [focusMode, setFocusMode] = useState(false);
   const mounted = useRef(true);
 
-const downloadPDF = async () => {
-  if (downloading) return;
+  const downloadPDF = async () => {
+    if (downloading) return;
 
-  const source = document.getElementById("note-content");
-  if (!source) return;
+    const source = document.getElementById("note-content");
+    if (!source) return;
 
-  setDownloading(true);
+    setDownloading(true);
 
-  try {
-    const clone = source.cloneNode(true);
-    clone.id = "pdf-note";
+    try {
+      const clone = source.cloneNode(true);
+      clone.id = "pdf-note";
 
-    // Remove Tailwind classes only
-    const stripClasses = (el) => {
-      el.removeAttribute("class");
-      [...el.children].forEach(stripClasses);
-    };
-    stripClasses(clone);
+      // Remove Tailwind classes only
+      const stripClasses = (el) => {
+        el.removeAttribute("class");
+        [...el.children].forEach(stripClasses);
+      };
+      stripClasses(clone);
 
-    // PDF typography stylesheet
-    const style = document.createElement("style");
-    style.innerHTML = `
+      // PDF typography stylesheet
+      const style = document.createElement("style");
+      style.innerHTML = `
       * {
         box-sizing: border-box;
         color: #111827 !important;
@@ -128,40 +130,80 @@ const downloadPDF = async () => {
       }
     `;
 
-    clone.prepend(style);
+      clone.prepend(style);
 
-    const wrapper = document.createElement("div");
-    wrapper.style.position = "fixed";
-    wrapper.style.left = "-9999px";
-    wrapper.appendChild(clone);
-    document.body.appendChild(wrapper);
+      const wrapper = document.createElement("div");
+      wrapper.style.position = "fixed";
+      wrapper.style.left = "-9999px";
+      wrapper.appendChild(clone);
+      document.body.appendChild(wrapper);
 
-    await html2pdf()
-      .set({
-        margin: [15, 15, 20, 15],
-        filename: `${title || "note"}.pdf`,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: {
-          scale: 2,
-          backgroundColor: "#ffffff",
-          useCORS: true,
-        },
-        jsPDF: {
-          unit: "mm",
-          format: "a4",
-          orientation: "portrait",
-        },
-      })
-      .from(clone)
-      .save();
+      await html2pdf()
+        .set({
+          margin: [15, 15, 20, 15],
+          filename: `${title || "note"}.pdf`,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: {
+            scale: 2,
+            backgroundColor: "#ffffff",
+            useCORS: true,
+          },
+          jsPDF: {
+            unit: "mm",
+            format: "a4",
+            orientation: "portrait",
+          },
+        })
+        .from(clone)
+        .save();
 
-    document.body.removeChild(wrapper);
-  } catch (err) {
-    console.error("Download PDF failed", err);
-  } finally {
-    setDownloading(false);
-  }
-};
+      document.body.removeChild(wrapper);
+    } catch (err) {
+      console.error("Download PDF failed", err);
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const plainText = useMemo(() => {
+    const noTags = (content || "").replace(/<[^>]+>/g, " ");
+    return noTags.replace(/\s+/g, " ").trim();
+  }, [content]);
+
+  const wordCount = useMemo(() => {
+    if (!plainText) return 0;
+    return plainText.split(" ").filter(Boolean).length;
+  }, [plainText]);
+
+  const charCount = useMemo(() => plainText.length, [plainText]);
+
+  const readMinutes = useMemo(() => {
+    if (!wordCount) return 0;
+    return Math.max(1, Math.ceil(wordCount / 200));
+  }, [wordCount]);
+
+  const insertTimestamp = () => {
+    const stamp = new Date().toLocaleString();
+    setContent((prev) => `${prev}<p>${stamp}</p>`);
+  };
+
+  const copyPlainText = async () => {
+    try {
+      await navigator.clipboard.writeText(plainText);
+    } catch (err) {
+      console.error("Copy failed", err);
+    }
+  };
+
+  const downloadTxt = () => {
+    const blob = new Blob([plainText || ""], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title || "note"}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   useEffect(() => {
     setTitle(note.title || "");
@@ -197,6 +239,7 @@ const downloadPDF = async () => {
         if (mounted.current) {
           onUpdate(res.data);
           setAutoSaving(false);
+          setLastSavedAt(new Date());
         }
       } catch (err) {
         console.error("Autosave failed", err);
@@ -217,6 +260,7 @@ const downloadPDF = async () => {
         folder,
       });
       onUpdate(res.data);
+      setLastSavedAt(new Date());
       setTimeout(() => setSaving(false), 500);
     } catch (err) {
       console.error("Save failed", err);
@@ -224,10 +268,9 @@ const downloadPDF = async () => {
     }
   };
 
-    
   const deleteNote = async () => {
     if (!confirm("Are you sure you want to delete this note?")) return;
-    
+
     try {
       setDeleting(true);
       await api.delete(`/notes/${note._id}`);
@@ -241,24 +284,52 @@ const downloadPDF = async () => {
   };
 
   return (
-    <main className="flex-1 p-8 overflow-auto bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950">
-      <div className="max-w-5xl mx-auto">
-        <div className="flex items-center gap-4 mb-6">
-          <input
-            className="text-4xl font-bold w-full outline-none bg-transparent text-gray-900 dark:text-white placeholder-gray-300 dark:placeholder-gray-700 transition-all duration-200 focus:placeholder-gray-400 dark:focus:placeholder-gray-600"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="✍️ Note Title"
-          />
-          {autoSaving && (
-            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 animate-fade-in">
-              <div className="w-4 h-4 border-2 border-gray-300 dark:border-gray-600 border-t-blue-500 rounded-full animate-spin"></div>
-              
+    <main className={`flex-1 overflow-auto ${focusMode ? "bg-white dark:bg-gray-950" : "bg-gradient-to-br from-gray-50 via-white to-gray-50 dark:from-gray-950 dark:via-gray-900 dark:to-gray-950"}`}>
+      <div className={`mx-auto ${focusMode ? "max-w-4xl" : "max-w-5xl"} px-6 py-8`}>
+        <div className="rounded-2xl border border-gray-200/70 dark:border-gray-800 bg-white/80 dark:bg-gray-900/70 backdrop-blur shadow-lg p-6 mb-8">
+          <div className="flex items-start gap-4">
+            <div className="flex-1">
+              <input
+                className="text-3xl md:text-4xl font-semibold w-full outline-none bg-transparent text-gray-900 dark:text-white placeholder-gray-300 dark:placeholder-gray-700 transition-all duration-200 focus:placeholder-gray-400 dark:focus:placeholder-gray-600"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Note title"
+              />
+              <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                <span className="px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-800">Words: {wordCount}</span>
+                <span className="px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-800">Chars: {charCount}</span>
+                <span className="px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-800">Read: {readMinutes} min</span>
+                {lastSavedAt && (
+                  <span className="px-2 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                    Saved {lastSavedAt.toLocaleTimeString()}
+                  </span>
+                )}
+                {autoSaving && (
+                  <span className="flex items-center gap-2 px-2 py-1 rounded-full bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                    <span className="w-2.5 h-2.5 border-2 border-blue-300 border-t-blue-600 rounded-full animate-spin"></span>
+                    Autosaving
+                  </span>
+                )}
+              </div>
             </div>
-          )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setFocusMode((v) => !v)}
+                className="px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+              >
+                {focusMode ? "Exit Focus" : "Focus Mode"}
+              </button>
+              <button
+                onClick={insertTimestamp}
+                className="px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition"
+              >
+                Insert Time
+              </button>
+            </div>
+          </div>
         </div>
 
-        <div className="flex gap-3 mb-8">
+        <div className="flex flex-wrap gap-3 mb-8">
           <button 
             onClick={saveNote} 
             disabled={saving}
@@ -270,7 +341,7 @@ const downloadPDF = async () => {
                 Saving...
               </span>
             ) : (
-              <span>💾 Save</span>
+              <span>Save</span>
             )}
           </button>
           
@@ -285,7 +356,7 @@ const downloadPDF = async () => {
                 Deleting...
               </span>
             ) : (
-              <span>🗑 Delete</span>
+              <span>Delete</span>
             )}
           </button>
 
@@ -300,15 +371,29 @@ const downloadPDF = async () => {
                 Downloading...
               </span>
             ) : (
-              <span>📄 Download PDF</span>
+              <span>Download PDF</span>
             )}
+          </button>
+
+          <button
+            onClick={copyPlainText}
+            className="px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 bg-white/70 dark:bg-gray-800 hover:shadow-sm transition"
+          >
+            Copy Text
+          </button>
+
+          <button
+            onClick={downloadTxt}
+            className="px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200 bg-white/70 dark:bg-gray-800 hover:shadow-sm transition"
+          >
+            Download TXT
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           <div className="relative">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
-              📁 Folder
+              Folder
             </label>
             <input
               value={folder}
@@ -319,7 +404,7 @@ const downloadPDF = async () => {
           </div>
           <div className="relative">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 block">
-              🏷️ Tags
+              Tags
             </label>
             <input
               value={tags.join(", ")}
@@ -344,12 +429,11 @@ const downloadPDF = async () => {
             {sourceFiles.length > 0 && (
               <div className="mt-6 p-5 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-2 border-blue-200 dark:border-blue-800 rounded-xl shadow-sm animate-fade-in">
                 <strong className="text-blue-900 dark:text-blue-200 flex items-center gap-2 mb-3">
-                  <span className="text-xl">📎</span> Uploaded Files
+                  <span className="text-xl">Files</span> Uploaded
                 </strong>
                 <ul className="space-y-2">
                   {sourceFiles.map((s, i) => (
                     <li key={i} className="flex items-center gap-2 text-sm text-blue-800 dark:text-blue-300 bg-white/50 dark:bg-gray-900/30 p-2 rounded-lg">
-                      <span className="text-base">📄</span>
                       <span className="font-medium">{s.name}</span>
                       <span className="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/40 px-2 py-0.5 rounded-full">
                         {s.fileType}
@@ -362,10 +446,16 @@ const downloadPDF = async () => {
           </div>
         )}
 
-        <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-300 hover:shadow-2xl"
-              id="note-content"
+        <div
+          className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 transition-all duration-300 hover:shadow-2xl focus-within:ring-2 focus-within:ring-blue-500/40"
+          id="note-content"
         >
           <Editor content={content} onChange={setContent} />
+          <div className="mt-6 pt-4 border-t border-gray-200/70 dark:border-gray-700/70 text-xs text-gray-500 dark:text-gray-400 flex flex-wrap gap-3">
+            <span>Autosave: {autoSaving ? "on" : "idle"}</span>
+            <span>Content: {wordCount} words</span>
+            <span>Reading time: {readMinutes} min</span>
+          </div>
         </div>
       </div>
     </main>
